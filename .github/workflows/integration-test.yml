@@ -20,7 +20,20 @@ jobs:
 
       - name: Build and run Compose Stack
         run: |
-          docker compose up --detach --build
+          docker compose \
+            --file docker-compose.yaml \
+            --file docker-compose.api.yaml \
+            --file docker-compose.a1111-test.yaml \
+            up --detach --build
+          
+      - name: Wait for Ollama to be up
+        timeout-minutes: 5
+        run: |
+          until curl --output /dev/null --silent --fail http://localhost:11434; do
+            printf '.'
+            sleep 1
+          done
+          echo "Service is up!"
 
       - name: Preload Ollama model
         run: |
@@ -86,7 +99,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
 

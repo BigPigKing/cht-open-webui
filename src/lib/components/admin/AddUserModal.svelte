@@ -73,13 +73,16 @@
 						console.log(idx, columns);
 
 						if (idx > 0) {
-							if (columns.length === 4 && ['admin', 'user', 'pending'].includes(columns[3])) {
+							if (
+								columns.length === 4 &&
+								['admin', 'user', 'pending'].includes(columns[3].toLowerCase())
+							) {
 								const res = await addUser(
 									localStorage.token,
 									columns[0],
 									columns[1],
 									columns[2],
-									columns[3]
+									columns[3].toLowerCase()
 								).catch((error) => {
 									toast.error(`Row ${idx + 1}: ${error}`);
 									return null;
@@ -107,7 +110,7 @@
 
 				reader.readAsText(file);
 			} else {
-				toast.error(`File not found.`);
+				toast.error($i18n.t('File not found.'));
 			}
 		}
 	};

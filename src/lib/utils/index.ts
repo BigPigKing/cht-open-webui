@@ -1,29 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
 import sha256 from 'js-sha256';
-import { getOllamaModels } from '$lib/apis/ollama';
-import { getOpenAIModels } from '$lib/apis/openai';
-import { getLiteLLMModels } from '$lib/apis/litellm';
-
-export const getModels = async (token: string) => {
-	let models = await Promise.all([
-		await getOllamaModels(token).catch((error) => {
-			console.log(error);
-			return null;
-		}),
-		await getOpenAIModels(token).catch((error) => {
-			console.log(error);
-			return null;
-		}),
-		await getLiteLLMModels(token).catch((error) => {
-			console.log(error);
-			return null;
-		})
-	]);
-
-	models = models.filter((models) => models).reduce((a, e, i, arr) => a.concat(e), []);
-
-	return models;
-};
 
 //////////////////////////
 // Helper functions
@@ -36,11 +12,12 @@ export const sanitizeResponseContent = (content: string) => {
 		.replace(/<$/, '')
 		.replaceAll(/<\|[a-z]+\|>/g, ' ')
 		.replaceAll('<', '&lt;')
+		.replaceAll('>', '&gt;')
 		.trim();
 };
 
 export const revertSanitizedResponseContent = (content: string) => {
-	return content.replaceAll('&lt;', '<');
+	return content.replaceAll('&lt;', '<').replaceAll('&gt;', '>');
 };
 
 export const capitalizeFirstLetter = (string) => {
@@ -472,29 +449,77 @@ export const blobToFile = (blob, fileName) => {
 	return file;
 };
 
-// promptTemplate replaces any occurrences of the following in the template with the prompt
-// {{prompt}} will be replaced with the prompt
-// {{prompt:start:<length>}} will be replaced with the first <length> characters of the prompt
-// {{prompt:end:<length>}} will be replaced with the last <length> characters of the prompt
-// Character length is used as we don't have the ability to tokenize the prompt
-export const promptTemplate = (template: string, prompt: string) => {
-	template = template.replace(/{{prompt}}/g, prompt);
+/**
+ * @param {string} template - The template string containing placeholders.
+ * @returns {string} The template string with the placeholders replaced by the prompt.
+ */
+export const promptTemplate = (
+	template: string,
+	user_name?: string,
+	current_location?: string
+): string => {
+	// Get the current date
+	const currentDate = new Date();
 
-	// Replace all instances of {{prompt:start:<length>}} with the first <length> characters of the prompt
-	const startRegex = /{{prompt:start:(\d+)}}/g;
-	let startMatch: RegExpMatchArray | null;
-	while ((startMatch = startRegex.exec(template)) !== null) {
-		const length = parseInt(startMatch[1]);
-		template = template.replace(startMatch[0], prompt.substring(0, length));
+	// Format the date to YYYY-MM-DD
+	const formattedDate =
+		currentDate.getFullYear() +
+		'-' +
+		String(currentDate.getMonth() + 1).padStart(2, '0') +
+		'-' +
+		String(currentDate.getDate()).padStart(2, '0');
+
+	// Replace {{CURRENT_DATE}} in the template with the formatted date
+	template = template.replace('{{CURRENT_DATE}}', formattedDate);
+
+	if (user_name) {
+		// Replace {{USER_NAME}} in the template with the user's name
+		template = template.replace('{{USER_NAME}}', user_name);
 	}
 
-	// Replace all instances of {{prompt:end:<length>}} with the last <length> characters of the prompt
-	const endRegex = /{{prompt:end:(\d+)}}/g;
-	let endMatch: RegExpMatchArray | null;
-	while ((endMatch = endRegex.exec(template)) !== null) {
-		const length = parseInt(endMatch[1]);
-		template = template.replace(endMatch[0], prompt.substring(prompt.length - length));
+	if (current_location) {
+		// Replace {{CURRENT_LOCATION}} in the template with the current location
+		template = template.replace('{{CURRENT_LOCATION}}', current_location);
 	}
+
+	return template;
+};
+
+/**
+ * This function is used to replace placeholders in a template string with the provided prompt.
+ * The placeholders can be in the following formats:
+ * - `{{prompt}}`: This will be replaced with the entire prompt.
+ * - `{{prompt:start:<length>}}`: This will be replaced with the first <length> characters of the prompt.
+ * - `{{prompt:end:<length>}}`: This will be replaced with the last <length> characters of the prompt.
+ * - `{{prompt:middletruncate:<length>}}`: This will be replaced with the prompt truncated to <length> characters, with '...' in the middle.
+ *
+ * @param {string} template - The template string containing placeholders.
+ * @param {string} prompt - The string to replace the placeholders with.
+ * @returns {string} The template string with the placeholders replaced by the prompt.
+ */
+export const titleGenerationTemplate = (template: string, prompt: string): string => {
+	template = template.replace(
+		/{{prompt}}|{{prompt:start:(\d+)}}|{{prompt:end:(\d+)}}|{{prompt:middletruncate:(\d+)}}/g,
+		(match, startLength, endLength, middleLength) => {
+			if (match === '{{prompt}}') {
+				return prompt;
+			} else if (match.startsWith('{{prompt:start:')) {
+				return prompt.substring(0, startLength);
+			} else if (match.startsWith('{{prompt:end:')) {
+				return prompt.slice(-endLength);
+			} else if (match.startsWith('{{prompt:middletruncate:')) {
+				if (prompt.length <= middleLength) {
+					return prompt;
+				}
+				const start = prompt.slice(0, Math.ceil(middleLength / 2));
+				const end = prompt.slice(-Math.floor(middleLength / 2));
+				return `${start}...${end}`;
+			}
+			return '';
+		}
+	);
+
+	template = promptTemplate(template);
 
 	return template;
 };
@@ -519,4 +544,35 @@ export const approximateToHumanReadable = (nanoseconds: number) => {
 	}
 
 	return results.reverse().join(' ');
+};
+
+export const getTimeRange = (timestamp) => {
+	const now = new Date();
+	const date = new Date(timestamp * 1000); // Convert Unix timestamp to milliseconds
+
+	// Calculate the difference in milliseconds
+	const diffTime = now.getTime() - date.getTime();
+	const diffDays = diffTime / (1000 * 3600 * 24);
+
+	const nowDate = now.getDate();
+	const nowMonth = now.getMonth();
+	const nowYear = now.getFullYear();
+
+	const dateDate = date.getDate();
+	const dateMonth = date.getMonth();
+	const dateYear = date.getFullYear();
+
+	if (nowYear === dateYear && nowMonth === dateMonth && nowDate === dateDate) {
+		return 'Today';
+	} else if (nowYear === dateYear && nowMonth === dateMonth && nowDate - dateDate === 1) {
+		return 'Yesterday';
+	} else if (diffDays <= 7) {
+		return 'Previous 7 days';
+	} else if (diffDays <= 30) {
+		return 'Previous 30 days';
+	} else if (nowYear === dateYear) {
+		return date.toLocaleString('default', { month: 'long' });
+	} else {
+		return date.getFullYear().toString();
+	}
 };
