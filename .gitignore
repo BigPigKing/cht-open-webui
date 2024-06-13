@@ -1,3 +1,6 @@
+# Storage
+cht-open-webui-storage/
+
 .DS_Store
 node_modules
 /build
