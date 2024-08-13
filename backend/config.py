@@ -4,6 +4,8 @@ import logging
 import importlib.metadata
 import pkgutil
 import chromadb
+import elasticsearch
+
 from chromadb import Settings
 from bs4 import BeautifulSoup
 from typing import TypeVar, Generic
@@ -870,7 +872,7 @@ SEARCH_QUERY_GENERATION_PROMPT_TEMPLATE = PersistentConfig(
     os.environ.get(
         "SEARCH_QUERY_GENERATION_PROMPT_TEMPLATE",
         """You are tasked with generating web search queries. Give me an appropriate query to answer my question for google search. Answer with only the query. Today is {{CURRENT_DATE}}.
-        
+
 Question:
 {{prompt:end:4000}}""",
     ),
@@ -1017,6 +1019,7 @@ RAG_RERANKING_MODEL = PersistentConfig(
     "rag.reranking_model",
     os.environ.get("RAG_RERANKING_MODEL", ""),
 )
+
 if RAG_RERANKING_MODEL.value != "":
     log.info(f"Reranking model set: {RAG_RERANKING_MODEL.value}"),
 
@@ -1047,6 +1050,10 @@ else:
         database=CHROMA_DATABASE,
     )
 
+ELASTICSEARCH_CLIENT = elasticsearch.Elasticsearch(
+    hosts=["http://10.0.0.196:9200"],
+    max_retries=10,
+)
 
 # device type embedding models - "cpu" (default), "cuda" (nvidia gpu required) or "mps" (apple silicon) - choosing this right can lead to better performance
 USE_CUDA = os.environ.get("USE_CUDA_DOCKER", "false")

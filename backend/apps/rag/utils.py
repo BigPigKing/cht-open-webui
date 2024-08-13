@@ -1,7 +1,9 @@
+import re
 import os
 import logging
 import requests
 
+from time import time
 from typing import List, Union
 
 from apps.ollama.main import (
@@ -17,17 +19,19 @@ from langchain.retrievers import (
     ContextualCompressionRetriever,
     EnsembleRetriever,
 )
+from langchain_community.embeddings import InfinityEmbeddings
 
 from typing import Optional
 
 from utils.misc import get_last_user_message, add_or_update_system_message
-from config import SRC_LOG_LEVELS, CHROMA_CLIENT
+from config import SRC_LOG_LEVELS, CHROMA_CLIENT, ELASTICSEARCH_CLIENT
+from langchain_elasticsearch import ElasticsearchStore
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["RAG"])
 
 
-def query_doc(
+def query_doc_chroma(
     collection_name: str,
     query: str,
     embedding_function,
@@ -46,6 +50,112 @@ def query_doc(
         return result
     except Exception as e:
         raise e
+
+
+def extract_uuid_from_source(source):
+    pattern = r"/app/backend/data/uploads/([a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})_"
+    match = re.search(pattern, source)
+
+    if match:
+        return match.group(1)
+    else:
+        return ""
+
+
+def extract_file_name_from_source(source):
+    # Captures the file name part up to the first dot after the UUID
+    pattern = r"/app/backend/data/uploads/[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}_(.*?)"
+    match = re.search(pattern, source)
+    if match:
+        return match.group(1)  # Returns the file name
+    return ""  # No file name found
+
+
+def transform_elasticsearch_result_to_chroma_search_result(documents):
+    """
+    Transforms a list of documents into a structured dictionary format.
+
+    Each document is a tuple of (Document, distance), where Document is an object with metadata and page_content.
+
+    :param documents: List of tuples, where each tuple contains a Document and its distance.
+    :return: A dictionary in the specified structured format.
+    """
+    structured_data = {
+        "ids": [],
+        "distances": [],
+        "embeddings": None,
+        "metadatas": [],
+        "documents": [],
+        "uris": None,
+        "data": None,
+        "included": ["metadatas", "documents", "distances"],
+    }
+
+    ids = []
+    distances = []
+    metadatas = []
+    documents_list = []
+
+    for doc, distance in documents:
+        ids.append(
+            doc.metadata["source"].split("/")[-1]
+        )  # Extract file_id from the path
+        distances.append(distance)  # Use the actual distance provided with the document
+        metadatas.append(
+            {
+                "file_id": doc.metadata["source"].split("/")[-1],
+                "name": doc.metadata["source"].split("/")[-1],
+                "source": doc.metadata["source"],
+                "start_index": doc.metadata["start_index"],
+            }
+        )
+        documents_list.append(doc.page_content)
+
+    structured_data["ids"].append(ids)
+    structured_data["distances"].append(distances)
+    structured_data["metadatas"].append(metadatas)
+    structured_data["documents"].append(documents_list)
+
+    return structured_data
+
+
+def query_doc_elasticsearch(
+    collection_name: str, query: str, embedding_function, k: int
+):
+    try:
+        start = time()
+        embeddings = InfinityEmbeddings(
+            model="BAAI/bge-m3",
+            infinity_api_url="http://10.0.0.196:7997",
+        )
+        es_db = ElasticsearchStore(
+            es_connection=ELASTICSEARCH_CLIENT,
+            index_name="*",
+            embedding=embeddings,
+        )
+        result = transform_elasticsearch_result_to_chroma_search_result(
+            es_db.similarity_search_with_relevance_scores(query, k=k)
+        )
+        end = time()
+
+        print(end - start)
+
+        log.info(f"query_doc:result_es {result}")
+        return result
+    except Exception as e:
+        raise e
+
+
+def query_doc(
+    collection_name: str,
+    query: str,
+    embedding_function,
+    k: int,
+):
+    if True:
+        return query_doc_elasticsearch(collection_name, query, embedding_function, k)
+    else:
+        return query_doc_chroma(collection_name, query, embedding_function, k)
 
 
 def query_doc_with_hybrid_search(
@@ -141,7 +251,7 @@ def merge_and_sort_query_results(query_results, k, reverse=False):
     return result
 
 
-def query_collection(
+def query_collection_chroma(
     collection_names: List[str],
     query: str,
     embedding_function,
@@ -156,10 +266,46 @@ def query_collection(
                 k=k,
                 embedding_function=embedding_function,
             )
+            print(result)
             results.append(result)
         except:
             pass
     return merge_and_sort_query_results(results, k=k)
+
+
+def query_collection_elasticsearch(
+    collection_names: List[str],
+    query: str,
+    embedding_function,
+    k: int,
+):
+    results = []
+    try:
+        result = query_doc(
+            collection_name=collection_names,
+            query=query,
+            k=k,
+            embedding_function=embedding_function,
+        )
+        print(result)
+        results.append(result)
+    except:
+        pass
+    return merge_and_sort_query_results(results, k=k)
+
+
+def query_collection(
+    collection_names: List[str],
+    query: str,
+    embedding_function,
+    k: int,
+):
+    if True:
+        return query_collection_elasticsearch(
+            collection_names, query, embedding_function, k
+        )
+    else:
+        return query_collection_chroma(collection_names, query, embedding_function, k)
 
 
 def query_collection_with_hybrid_search(

@@ -77,3 +77,8 @@ duckduckgo-search~=6.1.12
 docker~=7.1.0
 pytest~=8.2.2
 pytest-docker~=3.1.1
+
+# ElasticSearch
+elasticsearch==8.14.0
+langchain-elasticsearch==0.2.2
+langchain-openai==0.1.17

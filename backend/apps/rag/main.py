@@ -17,6 +17,7 @@ from typing import List, Union, Sequence, Iterator, Any
 
 from chromadb.utils.batch_utils import create_batches
 from langchain_core.documents import Document
+from langchain_community.embeddings import InfinityEmbeddings
 
 from langchain_community.document_loaders import (
     WebBaseLoader,
@@ -36,6 +37,7 @@ from langchain_community.document_loaders import (
     OutlookMessageLoader,
 )
 from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_elasticsearch import ElasticsearchStore
 
 import validators
 import urllib.parse
@@ -109,6 +111,7 @@ from config import (
     RAG_OPENAI_API_KEY,
     DEVICE_TYPE,
     CHROMA_CLIENT,
+    ELASTICSEARCH_CLIENT,
     CHUNK_SIZE,
     CHUNK_OVERLAP,
     RAG_TEMPLATE,
@@ -961,7 +964,7 @@ def store_text_in_vector_db(
     return store_docs_in_vector_db(docs, collection_name, overwrite=overwrite)
 
 
-def store_docs_in_vector_db(
+def store_docs_in_vector_db_chroma(
     docs, collection_name, metadata: Optional[dict] = None, overwrite: bool = False
 ) -> bool:
     log.info(f"store_docs_in_vector_db {docs} {collection_name}")
@@ -1014,6 +1017,50 @@ def store_docs_in_vector_db(
         log.exception(e)
 
         return False
+
+
+def store_docs_in_vector_db_elasticsearch(
+    docs, collection_name, metadata: Optional[dict] = None, overwrite: bool = False
+) -> bool:
+    log.info(f"store_docs_in_vector_db_es {docs} {collection_name}")
+
+    try:
+        embeddings = InfinityEmbeddings(
+            model="BAAI/bge-m3",
+            infinity_api_url="http://10.0.0.196:7997",
+        )
+
+        es_db = ElasticsearchStore(
+            es_connection=ELASTICSEARCH_CLIENT,
+            index_name="taipower-data",
+            embedding=embeddings,
+        )
+
+        es_db.add_documents(docs)
+
+        return True
+    except Exception as e:
+        if e.__class__.__name__ == "UniqueConstraintError":
+            return True
+
+        log.exception(e)
+
+        return False
+
+
+def store_docs_in_vector_db(
+    docs, collection_name, metadata: Optional[dict] = None, overwrite: bool = True
+) -> bool:
+    log.info(f"store_docs_in_vector_db {docs} {collection_name}")
+
+    if True:
+        return store_docs_in_vector_db_elasticsearch(
+            docs, collection_name, metadata, overwrite
+        )
+    else:
+        return store_docs_in_vector_db_chroma(
+            docs, collection_name, metadata, overwrite
+        )
 
 
 class TikaLoader:
