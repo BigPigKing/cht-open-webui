@@ -250,7 +250,7 @@ class ChatTable:
         user_id: str,
         include_archived: bool = False,
         skip: int = 0,
-        limit: int = -1,
+        limit: int = 100,
     ) -> List[ChatTitleIdResponse]:
         with get_db() as db:
             query = db.query(Chat).filter_by(user_id=user_id)

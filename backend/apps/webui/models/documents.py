@@ -109,7 +109,7 @@ class DocumentsTable:
         with get_db() as db:
 
             return [
-                DocumentModel.model_validate(doc) for doc in db.query(Document).all()
+                DocumentModel.model_validate(db.query(Document).first())
             ]
 
     def update_doc_by_name(

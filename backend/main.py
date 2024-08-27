@@ -730,8 +730,8 @@ class ChatCompletionMiddleware(BaseHTTPMiddleware):
         return {"type": "http.request", "body": body, "more_body": False}
 
     async def openai_stream_wrapper(self, original_generator, data_items):
-        for item in data_items:
-            yield f"data: {json.dumps(item)}\n\n"
+        # for item in data_items:
+        #     yield f"data: {json.dumps(item)}\n\n"
 
         async for data in original_generator:
             yield data

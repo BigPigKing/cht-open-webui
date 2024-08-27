@@ -23,6 +23,7 @@ from langchain_community.document_loaders import (
     WebBaseLoader,
     TextLoader,
     PyPDFLoader,
+    PyMuPDFLoader,
     CSVLoader,
     BSHTMLLoader,
     Docx2txtLoader,
@@ -1167,8 +1168,8 @@ def get_loader(filename: str, file_content_type: str, file_path: str):
             loader = TikaLoader(file_path, file_content_type)
     else:
         if file_ext == "pdf":
-            loader = PyPDFLoader(
-                file_path, extract_images=app.state.config.PDF_EXTRACT_IMAGES
+            loader = PyMuPDFLoader(
+                file_path, extract_images=True
             )
         elif file_ext == "csv":
             loader = CSVLoader(file_path)
@@ -1292,7 +1293,10 @@ def process_doc(
         loader, known_type = get_loader(
             file.filename, file.meta.get("content_type"), file_path
         )
+        print(loader)
+        print(known_type)
         data = loader.load()
+        print(data)
 
         try:
             result = store_data_in_vector_db(
