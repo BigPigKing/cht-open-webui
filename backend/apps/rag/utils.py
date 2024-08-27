@@ -4,7 +4,7 @@ import logging
 import requests
 
 from time import time
-from typing import List, Union
+from typing import Union
 
 from apps.ollama.main import (
     generate_ollama_embeddings,
@@ -268,7 +268,7 @@ def query_collection_chroma(
             )
             print(result)
             results.append(result)
-        except:
+        except Exception:
             pass
     return merge_and_sort_query_results(results, k=k)
 
@@ -313,6 +313,20 @@ def query_collection_with_hybrid_search(
     query: str,
     embedding_function,
     k: int,
+):
+    if True:
+        return query_collection_elasticsearch(
+            collection_names, query, embedding_function, k
+        )
+    else:
+        return query_collection_chroma(collection_names, query, embedding_function, k)
+
+
+def query_collection_with_hybrid_search(
+    collection_names: list[str],
+    query: str,
+    embedding_function,
+    k: int,
     reranking_function,
     r: float,
 ):
@@ -328,7 +342,7 @@ def query_collection_with_hybrid_search(
                 r=r,
             )
             results.append(result)
-        except:
+        except Exception:
             pass
     return merge_and_sort_query_results(results, k=k, reverse=True)
 
@@ -557,7 +571,7 @@ class ChromaRetriever(BaseRetriever):
         query: str,
         *,
         run_manager: CallbackManagerForRetrieverRun,
-    ) -> List[Document]:
+    ) -> list[Document]:
         query_embeddings = self.embedding_function(query)
 
         results = self.collection.query(

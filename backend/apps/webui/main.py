@@ -22,10 +22,11 @@ from apps.webui.utils import load_function_module_by_id
 from utils.misc import (
     openai_chat_chunk_message_template,
     openai_chat_completion_message_template,
-    apply_model_params_to_body,
+    apply_model_params_to_body_openai,
     apply_model_system_prompt_to_body,
 )
 
+from utils.tools import get_tools
 
 from config import (
     SHOW_ADMIN_DETAILS,
@@ -43,9 +44,12 @@ from config import (
     JWT_EXPIRES_IN,
     WEBUI_BANNERS,
     ENABLE_COMMUNITY_SHARING,
+    ENABLE_MESSAGE_RATING,
     AppConfig,
     OAUTH_USERNAME_CLAIM,
     OAUTH_PICTURE_CLAIM,
+    OAUTH_EMAIL_CLAIM,
+    CORS_ALLOW_ORIGIN,
 )
 
 from apps.socket.main import get_event_call, get_event_emitter
@@ -57,8 +61,6 @@ from typing import Iterator, Generator, AsyncGenerator
 from pydantic import BaseModel
 
 app = FastAPI()
-
-origins = ["*"]
 
 app.state.config = AppConfig()
 
@@ -81,9 +83,11 @@ app.state.config.WEBHOOK_URL = WEBHOOK_URL
 app.state.config.BANNERS = WEBUI_BANNERS
 
 app.state.config.ENABLE_COMMUNITY_SHARING = ENABLE_COMMUNITY_SHARING
+app.state.config.ENABLE_MESSAGE_RATING = ENABLE_MESSAGE_RATING
 
 app.state.config.OAUTH_USERNAME_CLAIM = OAUTH_USERNAME_CLAIM
 app.state.config.OAUTH_PICTURE_CLAIM = OAUTH_PICTURE_CLAIM
+app.state.config.OAUTH_EMAIL_CLAIM = OAUTH_EMAIL_CLAIM
 
 app.state.MODELS = {}
 app.state.TOOLS = {}
@@ -91,7 +95,7 @@ app.state.FUNCTIONS = {}
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=CORS_ALLOW_ORIGIN,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -272,7 +276,13 @@ def get_function_params(function_module, form_data, user, extra_params={}):
 async def generate_function_chat_completion(form_data, user):
     model_id = form_data.get("model")
     model_info = Models.get_model_by_id(model_id)
-    metadata = form_data.pop("metadata", None)
+    metadata = form_data.pop("metadata", {})
+    files = metadata.get("files", [])
+    tool_ids = metadata.get("tool_ids", [])
+
+    # Check if tool_ids is None
+    if tool_ids is None:
+        tool_ids = []
 
     __event_emitter__ = None
     __event_call__ = None
@@ -284,28 +294,34 @@ async def generate_function_chat_completion(form_data, user):
             __event_call__ = get_event_call(metadata)
         __task__ = metadata.get("task", None)
 
+    extra_params = {
+        "__event_emitter__": __event_emitter__,
+        "__event_call__": __event_call__,
+        "__task__": __task__,
+    }
+    tools_params = {
+        **extra_params,
+        "__model__": app.state.MODELS[form_data["model"]],
+        "__messages__": form_data["messages"],
+        "__files__": files,
+    }
+
+    tools = get_tools(app, tool_ids, user, tools_params)
+    extra_params["__tools__"] = tools
+
     if model_info:
         if model_info.base_model_id:
             form_data["model"] = model_info.base_model_id
 
         params = model_info.params.model_dump()
-        form_data = apply_model_params_to_body(params, form_data)
+        form_data = apply_model_params_to_body_openai(params, form_data)
         form_data = apply_model_system_prompt_to_body(params, form_data, user)
 
     pipe_id = get_pipe_id(form_data)
     function_module = get_function_module(pipe_id)
 
     pipe = function_module.pipe
-    params = get_function_params(
-        function_module,
-        form_data,
-        user,
-        {
-            "__event_emitter__": __event_emitter__,
-            "__event_call__": __event_call__,
-            "__task__": __task__,
-        },
-    )
+    params = get_function_params(function_module, form_data, user, extra_params)
 
     if form_data["stream"]:
 
