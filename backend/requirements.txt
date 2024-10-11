@@ -84,3 +84,4 @@ pytest-docker~=3.1.1
 elasticsearch==8.14.0
 langchain-elasticsearch==0.2.2
 langchain-openai==0.1.17
+python-docx==1.1.2

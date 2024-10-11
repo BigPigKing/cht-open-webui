@@ -4,7 +4,7 @@ import logging
 import requests
 
 from time import time
-from typing import Union
+from typing import Union, List
 
 from apps.ollama.main import (
     generate_ollama_embeddings,
@@ -32,6 +32,7 @@ log.setLevel(SRC_LOG_LEVELS["RAG"])
 
 
 def query_doc_chroma(
+    filename: str,
     collection_name: str,
     query: str,
     embedding_function,
@@ -120,7 +121,7 @@ def transform_elasticsearch_result_to_chroma_search_result(documents):
 
 
 def query_doc_elasticsearch(
-    collection_name: str, query: str, embedding_function, k: int
+    filename: str, collection_name: str, query: str, embedding_function, k: int
 ):
     try:
         start = time()
@@ -133,9 +134,27 @@ def query_doc_elasticsearch(
             index_name="*",
             embedding=embeddings,
         )
-        result = transform_elasticsearch_result_to_chroma_search_result(
-            es_db.similarity_search_with_relevance_scores(query, k=k)
-        )
+
+        result = []
+
+        if filename == "search_all_documents":
+            result = transform_elasticsearch_result_to_chroma_search_result(
+                es_db.similarity_search_with_relevance_scores(query, k=k)
+            )
+        else:
+            result = transform_elasticsearch_result_to_chroma_search_result(
+                es_db.similarity_search_with_relevance_scores(
+                    query,
+                    k=k,
+                    filter=[
+                        {
+                            "match_phrase": {
+                                "metadata.source": filename
+                            }
+                        }
+                    ],
+                )
+            )
         end = time()
 
         print(end - start)
@@ -147,18 +166,20 @@ def query_doc_elasticsearch(
 
 
 def query_doc(
+    filename: str,
     collection_name: str,
     query: str,
     embedding_function,
     k: int,
 ):
     if True:
-        return query_doc_elasticsearch(collection_name, query, embedding_function, k)
+        return query_doc_elasticsearch(filename, collection_name, query, embedding_function, k)
     else:
-        return query_doc_chroma(collection_name, query, embedding_function, k)
+        return query_doc_chroma(filename, collection_name, query, embedding_function, k)
 
 
 def query_doc_with_hybrid_search(
+    filename: str,
     collection_name: str,
     query: str,
     embedding_function,
@@ -252,7 +273,8 @@ def merge_and_sort_query_results(query_results, k, reverse=False):
 
 
 def query_collection_chroma(
-    collection_names: List[str],
+    filename: str,
+    collection_names: list[str],
     query: str,
     embedding_function,
     k: int,
@@ -261,6 +283,7 @@ def query_collection_chroma(
     for collection_name in collection_names:
         try:
             result = query_doc(
+                filename=filename,
                 collection_name=collection_name,
                 query=query,
                 k=k,
@@ -274,6 +297,7 @@ def query_collection_chroma(
 
 
 def query_collection_elasticsearch(
+    filename: str,
     collection_names: List[str],
     query: str,
     embedding_function,
@@ -282,12 +306,12 @@ def query_collection_elasticsearch(
     results = []
     try:
         result = query_doc(
+            filename=filename,
             collection_name=collection_names,
             query=query,
             k=k,
             embedding_function=embedding_function,
         )
-        print(result)
         results.append(result)
     except:
         pass
@@ -295,6 +319,7 @@ def query_collection_elasticsearch(
 
 
 def query_collection(
+    filename: str,
     collection_names: List[str],
     query: str,
     embedding_function,
@@ -302,13 +327,14 @@ def query_collection(
 ):
     if True:
         return query_collection_elasticsearch(
-            collection_names, query, embedding_function, k
+            filename, collection_names, query, embedding_function, k
         )
     else:
-        return query_collection_chroma(collection_names, query, embedding_function, k)
+        return query_collection_chroma(filename, collection_names, query, embedding_function, k)
 
 
 def query_collection_with_hybrid_search(
+    filename: str,
     collection_names: List[str],
     query: str,
     embedding_function,
@@ -316,13 +342,14 @@ def query_collection_with_hybrid_search(
 ):
     if True:
         return query_collection_elasticsearch(
-            collection_names, query, embedding_function, k
+            filename, collection_names, query, embedding_function, k
         )
     else:
-        return query_collection_chroma(collection_names, query, embedding_function, k)
+        return query_collection_chroma(filename, collection_names, query, embedding_function, k)
 
 
 def query_collection_with_hybrid_search(
+    filename: str,
     collection_names: list[str],
     query: str,
     embedding_function,
@@ -334,6 +361,7 @@ def query_collection_with_hybrid_search(
     for collection_name in collection_names:
         try:
             result = query_doc_with_hybrid_search(
+                filename=filename,
                 collection_name=collection_name,
                 query=query,
                 embedding_function=embedding_function,
@@ -414,6 +442,9 @@ def get_rag_context(
     for file in files:
         context = None
 
+        if "filename" not in file:
+            file["filename"] = "search_all_documents"
+
         collection_names = (
             file["collection_names"]
             if file["type"] == "collection"
@@ -431,6 +462,7 @@ def get_rag_context(
             else:
                 if hybrid_search:
                     context = query_collection_with_hybrid_search(
+                        filename=file["filename"],
                         collection_names=collection_names,
                         query=query,
                         embedding_function=embedding_function,
@@ -440,6 +472,7 @@ def get_rag_context(
                     )
                 else:
                     context = query_collection(
+                        filename=file["filename"],
                         collection_names=collection_names,
                         query=query,
                         embedding_function=embedding_function,

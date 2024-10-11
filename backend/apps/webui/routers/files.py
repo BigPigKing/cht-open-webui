@@ -36,6 +36,7 @@ import os, shutil, logging, re
 
 
 from config import SRC_LOG_LEVELS, UPLOAD_DIR
+from apps.webui.internal.db import get_db
 
 
 log = logging.getLogger(__name__)
@@ -82,6 +83,9 @@ def upload_file(file: UploadFile = File(...), user=Depends(get_verified_user)):
                 }
             ),
         )
+
+        with get_db() as db:
+            db.commit()
 
         if file:
             return file

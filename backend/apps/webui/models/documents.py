@@ -70,7 +70,6 @@ class DocumentForm(DocumentUpdateForm):
 
 
 class DocumentsTable:
-
     def insert_new_doc(
         self, user_id: str, form_data: DocumentForm
     ) -> Optional[DocumentModel]:
@@ -96,6 +95,27 @@ class DocumentsTable:
             except Exception:
                 return None
 
+    def insert_new_doc_without_commit(
+            self, db, user_id: str, form_data: DocumentForm
+        ) -> Optional[DocumentModel]:
+        document = DocumentModel(
+            **{
+                **form_data.model_dump(),
+                "user_id": user_id,
+                "timestamp": int(time.time()),
+            }
+        )
+
+        try:
+            result = Document(**document.model_dump())
+            db.add(result)
+            if result:
+                return DocumentModel.model_validate(result)
+            else:
+                return None
+        except Exception:
+            return None
+
     def get_doc_by_name(self, name: str) -> Optional[DocumentModel]:
         try:
             with get_db() as db:
@@ -105,11 +125,18 @@ class DocumentsTable:
         except Exception:
             return None
 
+    def get_doc_by_name_given_db(self, db, name) -> Optional[DocumentModel]:
+        try:
+            document = db.query(Document).filter_by(name=name).first()
+            return DocumentModel.model_validate(document) if document else None
+        except Exception:
+            return None
+
     def get_docs(self) -> list[DocumentModel]:
         with get_db() as db:
 
             return [
-                DocumentModel.model_validate(db.query(Document).first())
+                DocumentModel.model_validate(doc) for doc in db.query(Document).all()
             ]
 
     def update_doc_by_name(

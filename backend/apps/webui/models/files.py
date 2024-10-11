@@ -59,7 +59,6 @@ class FileForm(BaseModel):
 
 
 class FilesTable:
-
     def insert_new_file(self, user_id: str, form_data: FileForm) -> Optional[FileModel]:
         with get_db() as db:
 
@@ -83,6 +82,26 @@ class FilesTable:
             except Exception as e:
                 print(f"Error creating tool: {e}")
                 return None
+
+    def insert_new_file_without_commit(self, db, user_id: str, form_data: FileForm) -> Optional[FileModel]:
+        file = FileModel(
+            **{
+                **form_data.model_dump(),
+                "user_id": user_id,
+                "created_at": int(time.time()),
+            }
+        )
+
+        try:
+            result = File(**file.model_dump())
+            db.add(result)
+            if result:
+                return FileModel.model_validate(result)
+            else:
+                return None
+        except Exception as e:
+            print(f"Error creating tool: {e}")
+            return None
 
     def get_file_by_id(self, id: str) -> Optional[FileModel]:
         with get_db() as db:

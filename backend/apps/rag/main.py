@@ -138,6 +138,14 @@ from config import (
 
 from constants import ERROR_MESSAGES
 
+import uuid
+from apps.webui.internal.db import get_db
+from apps.webui.models.files import (
+    FileForm,
+)
+import multiprocessing
+import asyncio
+
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["RAG"])
 
@@ -1186,7 +1194,7 @@ def get_loader(filename: str, file_content_type: str, file_path: str):
             == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             or file_ext in ["doc", "docx"]
         ):
-            loader = Docx2txtLoader(file_path)
+            loader = UnstructuredWordDocumentLoader(file_path)
         elif file_content_type in [
             "application/vnd.ms-excel",
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1472,6 +1480,192 @@ def reset(user=Depends(get_admin_user)) -> bool:
         log.exception(e)
 
     return True
+
+
+def _get_file_metadata(file: UploadFile = File(...)):
+    file_id = str(uuid.uuid4())
+    filename = f"{file_id}_{os.path.basename(file.filename)}"
+    file_path = f"{UPLOAD_DIR}/{filename}"
+    contents = file.file.read()
+    with open(file_path, "wb") as f:
+        f.write(contents)
+        f.close()
+
+    return file_id, filename, file_path, contents
+
+
+def _insert_to_file_db(db, file, user):
+    log.info(f"_insert_to_file_db")
+    file_id, filename, file_path, contents = _get_file_metadata(file)
+
+    inserted_file_record = Files.insert_new_file_without_commit(
+        db,
+        user.id,
+        FileForm(
+            **{
+                "id": file_id,
+                "filename": filename,
+                "meta": {
+                    "name": filename,
+                    "content_type": file.content_type,
+                    "size": len(contents),
+                    "path": file_path,
+                },
+            }
+        ),
+    )
+
+    if inserted_file_record is not None:
+        return inserted_file_record
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.DEFAULT("Failed to insert a new file record"),
+        )
+
+
+async def _store_into_vectorstore_db(
+    inserted_file_record,
+):
+    log.info(f"_store_into_vectorstore_db")
+    try:
+        file_path = inserted_file_record.meta.get("path", f"{UPLOAD_DIR}/{inserted_file_record.filename}")
+
+        f = open(file_path, "rb")
+
+        collection_name = str(uuid.uuid4())
+        f.close()
+
+        loader, known_type = get_loader(
+            inserted_file_record.filename, inserted_file_record.meta.get("content_type"), file_path
+        )
+        log.info(f"_store_into_vectorstore_db_parsing...")
+        data = await loader.aload()
+
+        try:
+            log.info(f"_store_into_vectorstore_db_storing_to_db...")
+            result = store_data_in_vector_db(
+                data,
+                collection_name,
+                {
+                    "file_id": inserted_file_record.id,
+                    "name": inserted_file_record.meta.get("name", inserted_file_record.filename),
+                },
+            )
+
+            if result:
+                return {
+                    "status": True,
+                    "collection_name": collection_name,
+                    "known_type": known_type,
+                    "filename": inserted_file_record.meta.get("name", inserted_file_record.filename),
+                }
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=e,
+            )
+    except Exception as e:
+        log.exception(e)
+        if "No pandoc was found" in str(e):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=ERROR_MESSAGES.PANDOC_NOT_INSTALLED,
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=ERROR_MESSAGES.DEFAULT(e),
+            )
+
+
+def _insert_to_document_db(db, form_data: DocumentForm, user):
+    log.info(f"_insert_to_document_db")
+    doc = Documents.get_doc_by_name_given_db(db, form_data.name)
+    if doc is None:
+        doc = Documents.insert_new_doc_without_commit(db, user.id, form_data)
+
+        if doc:
+            return DocumentResponse(
+                **{
+                    **doc.model_dump(),
+                    "content": json.loads(doc.content if doc.content else "{}"),
+                }
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=ERROR_MESSAGES.FILE_EXISTS,
+            )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.NAME_TAG_TAKEN,
+        )
+
+
+async def _process_doc_for_airflow(file, user):
+    try:
+        with get_db() as db:
+            inserted_file_record = _insert_to_file_db(db, file, user)
+            inserted_vectorstore_result = await _store_into_vectorstore_db(inserted_file_record)
+            inserted_doc_results = _insert_to_document_db(
+                db,
+                DocumentForm(
+                    **{
+                        "name": inserted_vectorstore_result["filename"],
+                        "title": inserted_vectorstore_result["filename"],
+                        "collection_name": inserted_vectorstore_result["collection_name"],
+                        "filename": inserted_vectorstore_result["filename"],
+                        "content": ""
+                    }
+                ),
+                user
+            )
+            db.commit()
+            return inserted_doc_results
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=ERROR_MESSAGES.DEFAULT(e),
+        )
+
+@app.post("/airflow/doc-process")
+async def process_doc_for_airflow(file: UploadFile = File(...), user=Depends(get_verified_user)):
+    log.info(f"file.content_type: {file.content_type}")
+    timeout_duration = 600  # seconds
+
+    # Create a task for the document processing
+    task = asyncio.create_task(_process_doc_for_airflow(file, user))
+
+    try:
+        # Await the task with a timeout
+        result = await asyncio.wait_for(task, timeout=timeout_duration)
+        return result
+
+    except asyncio.TimeoutError:
+        log.error("The process took too long and timed out.")
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            log.info("The document processing task was successfully cancelled.")
+
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="The document processing took too long and was aborted. Please try again later."
+        )
+
+    except HTTPException as http_exc:
+        log.error(f"HTTP Exception occurred: {http_exc.detail}")
+        raise http_exc
+
+    except Exception as e:
+        log.exception("An unexpected error occurred.")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=ERROR_MESSAGES.DEFAULT(e),
+        )
 
 
 class SafeWebBaseLoader(WebBaseLoader):
