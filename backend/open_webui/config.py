@@ -898,8 +898,10 @@ CHROMA_HTTP_SSL = os.environ.get("CHROMA_HTTP_SSL", "false").lower() == "true"
 # this uses the model defined in the Dockerfile ENV variable. If you dont use docker or docker based deployments such as k8s, the default embedding model will be used (sentence-transformers/all-MiniLM-L6-v2)
 
 # Milvus
-
 MILVUS_URI = os.environ.get("MILVUS_URI", f"{DATA_DIR}/vector_db/milvus.db")
+
+# Elasticsearch
+ELASTICSEARCH_URI = os.environ.get("ELASTICSEARCH_URL", "http://10.0.0.196:9200")
 
 ####################################
 # Information Retrieval (RAG)
@@ -990,6 +992,18 @@ RAG_EMBEDDING_OPENAI_BATCH_SIZE = PersistentConfig(
     "RAG_EMBEDDING_OPENAI_BATCH_SIZE",
     "rag.embedding_openai_batch_size",
     int(os.environ.get("RAG_EMBEDDING_OPENAI_BATCH_SIZE", "1")),
+)
+
+RAG_EMBEDDING_OPENAI_URL = PersistentConfig(
+    "RAG_EMBEDDING_OPENAI_URL",
+    "rag.embedding_openai_url",
+    os.environ.get("RAG_EMBEDDING_OPENAI_URL", "http://10.0.0.196:7997"),
+)
+
+RAG_EMBEDDING_OPENAI_API_KEY = PersistentConfig(
+    "RAG_EMBEDDING_OPENAI_API_KEY",
+    "rag.embedding_openai_api_key",
+    os.environ.get("RAG_EMBEDDING_OPENAI_API_KEY", "test123"),
 )
 
 RAG_RERANKING_MODEL = PersistentConfig(

@@ -64,6 +64,8 @@ from open_webui.config import (
     RAG_EMBEDDING_MODEL_AUTO_UPDATE,
     RAG_EMBEDDING_MODEL_TRUST_REMOTE_CODE,
     RAG_EMBEDDING_OPENAI_BATCH_SIZE,
+    RAG_EMBEDDING_OPENAI_URL,
+    RAG_EMBEDDING_OPENAI_API_KEY,
     RAG_FILE_MAX_COUNT,
     RAG_FILE_MAX_SIZE,
     RAG_OPENAI_API_BASE_URL,
@@ -135,6 +137,8 @@ app.state.config.CHUNK_OVERLAP = CHUNK_OVERLAP
 app.state.config.RAG_EMBEDDING_ENGINE = RAG_EMBEDDING_ENGINE
 app.state.config.RAG_EMBEDDING_MODEL = RAG_EMBEDDING_MODEL
 app.state.config.RAG_EMBEDDING_OPENAI_BATCH_SIZE = RAG_EMBEDDING_OPENAI_BATCH_SIZE
+app.state.config.RAG_EMBEDDING_OPENAI_URL = RAG_EMBEDDING_OPENAI_URL
+app.state.config.RAG_EMBEDDING_OPENAI_API_KEY = RAG_EMBEDDING_OPENAI_API_KEY
 app.state.config.RAG_RERANKING_MODEL = RAG_RERANKING_MODEL
 app.state.config.RAG_TEMPLATE = RAG_TEMPLATE
 
@@ -231,8 +235,8 @@ app.state.EMBEDDING_FUNCTION = get_embedding_function(
     app.state.config.RAG_EMBEDDING_ENGINE,
     app.state.config.RAG_EMBEDDING_MODEL,
     app.state.sentence_transformer_ef,
-    app.state.config.OPENAI_API_KEY,
-    app.state.config.OPENAI_API_BASE_URL,
+    app.state.config.RAG_EMBEDDING_OPENAI_API_KEY,
+    app.state.config.RAG_EMBEDDING_OPENAI_URL,
     app.state.config.RAG_EMBEDDING_OPENAI_BATCH_SIZE,
 )
 
@@ -332,8 +336,8 @@ async def update_embedding_config(
             app.state.config.RAG_EMBEDDING_ENGINE,
             app.state.config.RAG_EMBEDDING_MODEL,
             app.state.sentence_transformer_ef,
-            app.state.config.OPENAI_API_KEY,
-            app.state.config.OPENAI_API_BASE_URL,
+            app.state.config.RAG_EMBEDDING_OPENAI_API_KEY,
+            app.state.config.RAG_EMBEDDING_OPENAI_URL,
             app.state.config.RAG_EMBEDDING_OPENAI_BATCH_SIZE,
         )
 
@@ -688,8 +692,8 @@ def save_docs_to_vector_db(
             app.state.config.RAG_EMBEDDING_ENGINE,
             app.state.config.RAG_EMBEDDING_MODEL,
             app.state.sentence_transformer_ef,
-            app.state.config.OPENAI_API_KEY,
-            app.state.config.OPENAI_API_BASE_URL,
+            app.state.config.RAG_EMBEDDING_OPENAI_API_KEY,
+            app.state.config.RAG_EMBEDDING_OPENAI_URL,
             app.state.config.RAG_EMBEDDING_OPENAI_BATCH_SIZE,
         )
 
@@ -802,6 +806,152 @@ def process_file(
                 )
 
                 docs = loader.load(
+                    file.filename, file.meta.get("content_type"), file_path
+                )
+            else:
+                docs = [
+                    Document(
+                        page_content=file.data.get("content", ""),
+                        metadata={
+                            "name": file.filename,
+                            "created_by": file.user_id,
+                            "file_id": file.id,
+                            **file.meta,
+                        },
+                    )
+                ]
+
+            text_content = " ".join([doc.page_content for doc in docs])
+
+        log.debug(f"text_content: {text_content}")
+        Files.update_file_data_by_id(
+            file.id,
+            {"content": text_content},
+        )
+
+        hash = calculate_sha256_string(text_content)
+        Files.update_file_hash_by_id(file.id, hash)
+
+        try:
+            result = save_docs_to_vector_db(
+                docs=docs,
+                collection_name=collection_name,
+                metadata={
+                    "file_id": file.id,
+                    "name": file.meta.get("name", file.filename),
+                    "hash": hash,
+                },
+                add=(True if form_data.collection_name else False),
+            )
+
+            if result:
+                Files.update_file_metadata_by_id(
+                    file.id,
+                    {
+                        "collection_name": collection_name,
+                    },
+                )
+
+                return {
+                    "status": True,
+                    "collection_name": collection_name,
+                    "filename": file.meta.get("name", file.filename),
+                    "content": text_content,
+                }
+        except Exception as e:
+            raise e
+    except Exception as e:
+        log.exception(e)
+        if "No pandoc was found" in str(e):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=ERROR_MESSAGES.PANDOC_NOT_INSTALLED,
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e),
+            )
+
+
+@app.post("/async/process/file")
+async def aprocess_file(
+    form_data: ProcessFileForm,
+    user=Depends(get_verified_user),
+):
+    try:
+        file = Files.get_file_by_id(form_data.file_id)
+
+        collection_name = form_data.collection_name
+
+        if collection_name is None:
+            collection_name = f"file-{file.id}"
+
+        if form_data.content:
+            # Update the content in the file
+            # Usage: /files/{file_id}/data/content/update
+
+            VECTOR_DB_CLIENT.delete(
+                collection_name=f"file-{file.id}",
+                filter={"file_id": file.id},
+            )
+
+            docs = [
+                Document(
+                    page_content=form_data.content,
+                    metadata={
+                        "name": file.meta.get("name", file.filename),
+                        "created_by": file.user_id,
+                        "file_id": file.id,
+                        **file.meta,
+                    },
+                )
+            ]
+
+            text_content = form_data.content
+        elif form_data.collection_name:
+            # Check if the file has already been processed and save the content
+            # Usage: /knowledge/{id}/file/add, /knowledge/{id}/file/update
+
+            result = VECTOR_DB_CLIENT.query(
+                collection_name=f"file-{file.id}", filter={"file_id": file.id}
+            )
+
+            if len(result.ids[0]) > 0:
+                docs = [
+                    Document(
+                        page_content=result.documents[0][idx],
+                        metadata=result.metadatas[0][idx],
+                    )
+                    for idx, id in enumerate(result.ids[0])
+                ]
+            else:
+                docs = [
+                    Document(
+                        page_content=file.data.get("content", ""),
+                        metadata={
+                            "name": file.meta.get("name", file.filename),
+                            "created_by": file.user_id,
+                            "file_id": file.id,
+                            **file.meta,
+                        },
+                    )
+                ]
+
+            text_content = file.data.get("content", "")
+        else:
+            # Process the file and save the content
+            # Usage: /files/
+
+            file_path = file.meta.get("path", None)
+            if file_path:
+                loader = Loader(
+                    engine=app.state.config.CONTENT_EXTRACTION_ENGINE,
+                    TIKA_SERVER_URL=app.state.config.TIKA_SERVER_URL,
+                    PDF_EXTRACT_IMAGES=app.state.config.PDF_EXTRACT_IMAGES,
+                )
+
+                docs = await loader.aload(
                     file.filename, file.meta.get("content_type"), file_path
                 )
             else:

@@ -9,7 +9,7 @@ import mimetypes
 
 
 from open_webui.apps.webui.models.files import FileForm, FileModel, Files
-from open_webui.apps.retrieval.main import process_file, ProcessFileForm
+from open_webui.apps.retrieval.main import process_file, ProcessFileForm, aprocess_file
 
 from open_webui.config import UPLOAD_DIR
 from open_webui.env import SRC_LOG_LEVELS
@@ -69,6 +69,63 @@ def upload_file(file: UploadFile = File(...), user=Depends(get_verified_user)):
 
         try:
             process_file(ProcessFileForm(file_id=id))
+            file = Files.get_file_by_id(id=id)
+        except Exception as e:
+            log.exception(e)
+            log.error(f"Error processing file: {file.id}")
+
+        if file:
+            return file
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=ERROR_MESSAGES.DEFAULT("Error uploading file"),
+            )
+
+    except Exception as e:
+        log.exception(e)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.DEFAULT(e),
+        )
+
+
+@router.post("/async")
+async def aupload_file(file: UploadFile = File(...), user=Depends(get_verified_user)):
+    log.info(f"file.content_type: {file.content_type}")
+    try:
+        unsanitized_filename = file.filename
+        filename = os.path.basename(unsanitized_filename)
+
+        # replace filename with uuid
+        id = str(uuid.uuid4())
+        name = filename
+        filename = f"{id}_{filename}"
+        file_path = f"{UPLOAD_DIR}/{filename}"
+
+        contents = file.file.read()
+        with open(file_path, "wb") as f:
+            f.write(contents)
+            f.close()
+
+        file = Files.insert_new_file(
+            user.id,
+            FileForm(
+                **{
+                    "id": id,
+                    "filename": filename,
+                    "meta": {
+                        "name": name,
+                        "content_type": file.content_type,
+                        "size": len(contents),
+                        "path": file_path,
+                    },
+                }
+            ),
+        )
+
+        try:
+            await aprocess_file(ProcessFileForm(file_id=id))
             file = Files.get_file_by_id(id=id)
         except Exception as e:
             log.exception(e)
@@ -195,6 +252,28 @@ async def update_file_data_content_by_id(
     if file and (file.user_id == user.id or user.role == "admin"):
         try:
             process_file(ProcessFileForm(file_id=id, content=form_data.content))
+            file = Files.get_file_by_id(id=id)
+        except Exception as e:
+            log.exception(e)
+            log.error(f"Error processing file: {file.id}")
+
+        return {"content": file.data.get("content", "")}
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
+
+
+@router.post("/{id}/async/data/content/update")
+async def update_file_data_content_by_id(
+    id: str, form_data: ContentForm, user=Depends(get_verified_user)
+):
+    file = Files.get_file_by_id(id)
+
+    if file and (file.user_id == user.id or user.role == "admin"):
+        try:
+            aprocess_file(ProcessFileForm(file_id=id, content=form_data.content))
             file = Files.get_file_by_id(id=id)
         except Exception as e:
             log.exception(e)
