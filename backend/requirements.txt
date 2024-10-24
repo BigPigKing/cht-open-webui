@@ -88,3 +88,5 @@ pytest~=8.3.2
 pytest-docker~=3.1.1
 
 pymupdf
+elasticsearch
+langchain_elasticsearch

@@ -643,17 +643,17 @@ def save_docs_to_vector_db(
     log.info(f"save_docs_to_vector_db {docs} {collection_name}")
 
     # Check if entries with the same hash (metadata.hash) already exist
-    if metadata and "hash" in metadata:
-        result = VECTOR_DB_CLIENT.query(
-            collection_name=collection_name,
-            filter={"hash": metadata["hash"]},
-        )
+    # if metadata and "hash" in metadata:
+    #     result = VECTOR_DB_CLIENT.query(
+    #         collection_name=collection_name,
+    #         filter={"hash": metadata["hash"]},
+    #     )
 
-        if result:
-            existing_doc_ids = result.ids[0]
-            if existing_doc_ids:
-                log.info(f"Document with hash {metadata['hash']} already exists")
-                raise ValueError(ERROR_MESSAGES.DUPLICATE_CONTENT)
+    #     if result:
+    #         existing_doc_ids = result.ids[0]
+    #         if existing_doc_ids:
+    #             log.info(f"Document with hash {metadata['hash']} already exists")
+    #             raise ValueError(ERROR_MESSAGES.DUPLICATE_CONTENT)
 
     if split:
         text_splitter = RecursiveCharacterTextSplitter(
@@ -671,10 +671,10 @@ def save_docs_to_vector_db(
 
     # ChromaDB does not like datetime formats
     # for meta-data so convert them to string.
-    for metadata in metadatas:
-        for key, value in metadata.items():
-            if isinstance(value, datetime):
-                metadata[key] = str(value)
+    # for metadata in metadatas:
+    #     for key, value in metadata.items():
+    #         if isinstance(value, datetime):
+    #             metadata[key] = str(value)
 
     try:
         if VECTOR_DB_CLIENT.has_collection(collection_name=collection_name):
@@ -767,30 +767,30 @@ def process_file(
             # Check if the file has already been processed and save the content
             # Usage: /knowledge/{id}/file/add, /knowledge/{id}/file/update
 
-            result = VECTOR_DB_CLIENT.query(
-                collection_name=f"file-{file.id}", filter={"file_id": file.id}
-            )
+            # result = VECTOR_DB_CLIENT.query(
+            #     collection_name=f"file-{file.id}", filter={"file_id": file.id}
+            # )
 
-            if len(result.ids[0]) > 0:
-                docs = [
-                    Document(
-                        page_content=result.documents[0][idx],
-                        metadata=result.metadatas[0][idx],
-                    )
-                    for idx, id in enumerate(result.ids[0])
-                ]
-            else:
-                docs = [
-                    Document(
-                        page_content=file.data.get("content", ""),
-                        metadata={
-                            "name": file.meta.get("name", file.filename),
-                            "created_by": file.user_id,
-                            "file_id": file.id,
-                            **file.meta,
-                        },
-                    )
-                ]
+            # if len(result.ids[0]) > 0:
+            #     docs = [
+            #         Document(
+            #             page_content=result.documents[0][idx],
+            #             metadata=result.metadatas[0][idx],
+            #         )
+            #         for idx, id in enumerate(result.ids[0])
+            #     ]
+            # else:
+            docs = [
+                Document(
+                    page_content=file.data.get("content", ""),
+                    metadata={
+                        "name": file.meta.get("name", file.filename),
+                        "created_by": file.user_id,
+                        "file_id": file.id,
+                        **file.meta,
+                    },
+                )
+            ]
 
             text_content = file.data.get("content", "")
         else:

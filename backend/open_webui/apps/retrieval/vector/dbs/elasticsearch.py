@@ -1,3 +1,4 @@
+import time
 import logging
 import elasticsearch
 
@@ -34,7 +35,7 @@ But for those chunks that come from the same document, it `collection` metadata 
 '''
 class ElasticsearchClient:
     def __init__(self):
-        self.client = elasticsearch.ElasticSearch(
+        self.client = elasticsearch.Elasticsearch(
             hosts=[ELASTICSEARCH_URI]
         )
         self.embeddings = InfinityEmbeddings(
@@ -44,8 +45,22 @@ class ElasticsearchClient:
         self.es_vs = ElasticsearchStore(
             es_connection=self.client,
             index_name=DEFAULT_INDEX_NAME,
-            embedding=embeddings
+            embedding=self.embeddings
         )
+
+        time.sleep(15)
+        docs = [
+            Document(
+                page_content="test",
+                metadata={
+                    "collection": "test"
+                }
+            )
+        ]
+        ids = [
+            "test"
+        ]
+        self.es_vs.add_documents(documents=docs, ids=ids)
         
 
     def _hits_to_get_result(self, hits) -> GetResult:
@@ -99,13 +114,40 @@ class ElasticsearchClient:
         self, collection_name: str, vectors: list[list[float | int]], limit: int
     ) -> Optional[SearchResult]:
         # Search for the nearest neighbor items based on the vectors and return 'limit' number of results.
+        docs = self.es_vs.similarity_search_by_vector_with_relevance_scores(
+            embedding=vectors[0],
+            k=limit,
+            filter=[
+                {
+                    "term": {
+                        "metadata.collection.keyword": collection_name
+                    }
+                }
+            ]
+        )
+        
         return NotImplemented
 
     def query(
         self, collection_name: str, filter: dict, limit: Optional[int] = None
     ) -> Optional[GetResult]:
         # Query the items from the collection based on the filter.
-        return NotImplemented
+        query = {
+            "query": {
+                "term": {
+                    "metadata.collection": collection_name
+                }
+            },
+        }
+
+        # Only add the `size` field if `limit` is provided
+        if limit is not None:
+            query["size"] = limit
+        
+        response = self.client.search(index=DEFAULT_INDEX_NAME, body=query)
+
+        print(response)
+        return self._hits_to_get_result(response['hits']['hits'])
 
     def get(self, collection_name: str) -> Optional[GetResult]:
         query = {
@@ -136,7 +178,7 @@ class ElasticsearchClient:
             item["id"] for item in items
         ]
 
-        self.client.add_documents(documents=documents, ids=ids)
+        self.es_vs.add_documents(documents=docs, ids=ids)
 
     def upsert(self, collection_name: str, items: list[VectorItem]):
         # Update the items in the collection, if the items are not present, insert them. If the collection does not exist, it will be created.
