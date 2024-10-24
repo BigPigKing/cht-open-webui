@@ -111,8 +111,8 @@ from config import (
     RAG_OPENAI_API_BASE_URL,
     RAG_OPENAI_API_KEY,
     DEVICE_TYPE,
-    CHROMA_CLIENT,
-    ELASTICSEARCH_CLIENT,
+    RAG_VECTORSTORE,
+    RAG_VECTORSTORE_CLIENT,
     CHUNK_SIZE,
     CHUNK_OVERLAP,
     RAG_TEMPLATE,
@@ -988,12 +988,12 @@ def store_docs_in_vector_db_chroma(
 
     try:
         if overwrite:
-            for collection in CHROMA_CLIENT.list_collections():
+            for collection in RAG_VECTORSTORE_CLIENT.list_collections():
                 if collection_name == collection.name:
                     log.info(f"deleting existing collection {collection_name}")
-                    CHROMA_CLIENT.delete_collection(name=collection_name)
+                    RAG_VECTORSTORE_CLIENT.delete_collection(name=collection_name)
 
-        collection = CHROMA_CLIENT.create_collection(name=collection_name)
+        collection = RAG_VECTORSTORE_CLIENT.create_collection(name=collection_name)
 
         embedding_func = get_embedding_function(
             app.state.config.RAG_EMBEDDING_ENGINE,
@@ -1008,7 +1008,7 @@ def store_docs_in_vector_db_chroma(
         embeddings = embedding_func(embedding_texts)
 
         for batch in create_batches(
-            api=CHROMA_CLIENT,
+            api=RAG_VECTORSTORE_CLIENT,
             ids=[str(uuid.uuid4()) for _ in texts],
             metadatas=metadatas,
             embeddings=embeddings,
@@ -1038,7 +1038,7 @@ def store_docs_in_vector_db_elasticsearch(
         )
 
         es_db = ElasticsearchStore(
-            es_connection=ELASTICSEARCH_CLIENT,
+            es_connection=RAG_VECTORSTORE_CLIENT,
             index_name="taipower-data",
             embedding=embeddings,
         )
@@ -1060,7 +1060,7 @@ def store_docs_in_vector_db(
 ) -> bool:
     log.info(f"store_docs_in_vector_db {docs} {collection_name}")
 
-    if True:
+    if RAG_VECTORSTORE.value == "elasticsearch":
         return store_docs_in_vector_db_elasticsearch(
             docs, collection_name, metadata, overwrite
         )
@@ -1434,7 +1434,7 @@ def scan_docs_dir(user=Depends(get_admin_user)):
 
 @app.get("/reset/db")
 def reset_vector_db(user=Depends(get_admin_user)):
-    CHROMA_CLIENT.reset()
+    RAG_VECTORSTORE_CLIENT.reset()
 
 
 @app.get("/reset/uploads")
@@ -1475,7 +1475,7 @@ def reset(user=Depends(get_admin_user)) -> bool:
             log.error("Failed to delete %s. Reason: %s" % (file_path, e))
 
     try:
-        CHROMA_CLIENT.reset()
+        RAG_VECTORSTORE_CLIENT.reset()
     except Exception as e:
         log.exception(e)
 

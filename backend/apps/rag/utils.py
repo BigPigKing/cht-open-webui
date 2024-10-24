@@ -24,7 +24,7 @@ from langchain_community.embeddings import InfinityEmbeddings
 from typing import Optional
 
 from utils.misc import get_last_user_message, add_or_update_system_message
-from config import SRC_LOG_LEVELS, CHROMA_CLIENT, ELASTICSEARCH_CLIENT
+from config import SRC_LOG_LEVELS, RAG_VECTORSTORE_CLIENT, RAG_VECTORSTORE
 from langchain_elasticsearch import ElasticsearchStore
 
 log = logging.getLogger(__name__)
@@ -39,7 +39,7 @@ def query_doc_chroma(
     k: int,
 ):
     try:
-        collection = CHROMA_CLIENT.get_collection(name=collection_name)
+        collection = RAG_VECTORSTORE_CLIENT.get_collection(name=collection_name)
         query_embeddings = embedding_function(query)
 
         result = collection.query(
@@ -130,7 +130,7 @@ def query_doc_elasticsearch(
             infinity_api_url="http://10.0.0.196:7997",
         )
         es_db = ElasticsearchStore(
-            es_connection=ELASTICSEARCH_CLIENT,
+            es_connection=RAG_VECTORSTORE_CLIENT,
             index_name="*",
             embedding=embeddings,
         )
@@ -172,7 +172,7 @@ def query_doc(
     embedding_function,
     k: int,
 ):
-    if True:
+    if RAG_VECTORSTORE.value == 'elasticsearch':
         return query_doc_elasticsearch(filename, collection_name, query, embedding_function, k)
     else:
         return query_doc_chroma(filename, collection_name, query, embedding_function, k)
@@ -188,7 +188,7 @@ def query_doc_with_hybrid_search(
     r: float,
 ):
     try:
-        collection = CHROMA_CLIENT.get_collection(name=collection_name)
+        collection = RAG_VECTORSTORE_CLIENT.get_collection(name=collection_name)
         documents = collection.get()  # get all documents
 
         bm25_retriever = BM25Retriever.from_texts(
