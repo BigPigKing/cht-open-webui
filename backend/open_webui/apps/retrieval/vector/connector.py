@@ -8,6 +8,10 @@ elif VECTOR_DB == "elasticsearch":
     from open_webui.apps.retrieval.vector.dbs.elasticsearch import ElasticsearchClient
 
     VECTOR_DB_CLIENT = ElasticsearchClient()
+elif VECTOR_DB == "qdrant":
+    from open_webui.apps.retrieval.vector.dbs.qdrant import QdrantClient
+
+    VECTOR_DB_CLIENT = QdrantClient()
 else:
     from open_webui.apps.retrieval.vector.dbs.chroma import ChromaClient
 
