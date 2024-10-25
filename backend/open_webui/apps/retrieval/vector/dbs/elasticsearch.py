@@ -81,6 +81,28 @@ class ElasticsearchClient:
             }
         )
 
+    def _docs_to_search_result(self, docs) -> SearchResult:
+        print(docs)
+        
+        ids = []
+        distances = []
+        documents = []
+        metadatas = []
+
+        for doc in docs:
+            ids.append(doc.id)
+            documents.append(doc.page_content)
+            metadatas.append(doc.metadata)
+            distances.append([0.123456])
+
+        return GetResult(
+            **{
+                "ids": ids,
+                "documents": documents,
+                "metadatas": metadatas,
+            }
+        )
+
     def has_collection(self, collection_name: str) -> bool:
         query = {
             "query": {
@@ -114,19 +136,21 @@ class ElasticsearchClient:
         self, collection_name: str, vectors: list[list[float | int]], limit: int
     ) -> Optional[SearchResult]:
         # Search for the nearest neighbor items based on the vectors and return 'limit' number of results.
+        print("GGGGGGGGGGGG")
+        print(collection_name)
         docs = self.es_vs.similarity_search_by_vector_with_relevance_scores(
             embedding=vectors[0],
             k=limit,
             filter=[
                 {
                     "term": {
-                        "metadata.collection.keyword": collection_name
+                        "metadata.collection": collection_name
                     }
                 }
             ]
         )
         
-        return NotImplemented
+        return self._docs_to_search_result(docs)
 
     def query(
         self, collection_name: str, filter: dict, limit: Optional[int] = None
